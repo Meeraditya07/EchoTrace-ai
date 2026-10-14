@@ -125,6 +125,32 @@ In accordance with our **Responsible AI standard**, we explicitly state what is 
 
 ---
 
+## Limitations
+
+While EchoTrace AI provides an interactive, fully functional prototype of temporal recurrence clustering and preventive playbooks, the following limitations genuinely apply to the current implementation:
+
+1. **Constraints of Related-Report Detection:**
+   - The similarity engine (`similarityEngine.ts`) uses deterministic heuristics (spatial string tokenization, temporal decay math, and predefined symptom dictionary sets) rather than continuous deep-learning vector embeddings or large language models.
+   - Variations in spelling, terminology outside the curated symptom keyword clusters, or non-English submissions may yield lower match confidence or missed correlations.
+
+2. **Mandatory Human Verification (No Automated Causal Claims):**
+   - The system identifies potential **correlational links**, not proven physical causes.
+   - A high confidence score (e.g., 91%) indicates that two observations share strong spatial, temporal, and symptomatic signals, but it does not prove that one incident caused the other.
+   - Physical field inspection and human verification remain strictly required before initiating structural or costly facility repairs.
+
+3. **Demo-Only Functionality & Synthetic Data:**
+   - The initial observations (`#OBS-2026-001` through `#OBS-2026-006`) and the modal quick-fill buttons are pre-populated synthetic data designed to demonstrate campus recurrence patterns during evaluation.
+   - In a production deployment, these would be replaced by authenticated incident feeds from an institutional work-order system.
+
+4. **Client-Side Storage Scope:**
+   - Persistence is implemented entirely in the browser's `localStorage` (`echotrace_observations` and `echotrace_timeline`).
+   - There is no centralized multi-tenant database, backend server, or cross-device real-time sync. Changes made in one browser session are contained within that local browser.
+
+5. **Simulated Sensor & Hardware Integration:**
+   - Playbook action items mention physical equipment and diagnostics (e.g., IoT LoRaWAN moisture pucks, borescope cameras, subfloor moisture meters), but the application does not connect to physical telemetry hardware or campus Building Management Systems (BMS). All checklist updates are recorded manually.
+
+---
+
 ## 🧭 Short Demo Walkthrough for Judges
 
 1. **Observe the Dashboard:**
