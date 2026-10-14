@@ -112,6 +112,11 @@ function evaluateLocationProximity(obsA: Observation, obsB: Observation): { scor
 function evaluateTemporalProximity(timestampA: string, timestampB: string): { score: number; deltaHours: number; detail: string } {
   const timeA = new Date(timestampA).getTime();
   const timeB = new Date(timestampB).getTime();
+
+  if (isNaN(timeA) || isNaN(timeB)) {
+    return { score: 10, deltaHours: 0, detail: 'Indeterminate or unparseable temporal window' };
+  }
+
   const deltaHours = Math.abs(timeA - timeB) / (1000 * 60 * 60);
 
   let score = 0;

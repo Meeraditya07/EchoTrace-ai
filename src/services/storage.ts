@@ -330,59 +330,172 @@ SEED_OBSERVATIONS.forEach(obs => {
   obs.playbook = generatePlaybookForObservation(obs);
 });
 
+// Resilient storage fallback for test runners (Node.js/Vitest), private browsing, or restricted storage
+let inMemoryFallback: Record<string, string> = {};
+
+function readStorageRaw(key: string): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(key);
+    }
+  } catch (err) {
+    console.warn('[EchoTrace Storage] Browser localStorage unavailable; using in-memory fallback:', err);
+  }
+  return inMemoryFallback[key] ?? null;
+}
+
+function writeStorageRaw(key: string, value: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(key, value);
+      return;
+    }
+  } catch (err) {
+    console.warn('[EchoTrace Storage] Browser localStorage write failed; using in-memory fallback:', err);
+  }
+  inMemoryFallback[key] = value;
+}
+
+export const VALID_CATEGORIES: ReadonlySet<Observation['category']> = new Set([
+  'plumbing', 'electrical', 'hvac', 'structural', 'safety', 'access', 'sanitation'
+]);
+
+export const VALID_SEVERITIES: ReadonlySet<Observation['severity']> = new Set([
+  'low', 'medium', 'high', 'critical'
+]);
+
+export const VALID_REPORTER_TYPES: ReadonlySet<Observation['reporterType']> = new Set([
+  'student', 'faculty', 'facility_staff', 'visitor'
+]);
+
+export const VALID_STATUSES: ReadonlySet<ProblemStatus> = new Set([
+  'open', 'investigating', 'action_taken', 'resolved'
+]);
+
+export const VALID_VERIFICATIONS: ReadonlySet<VerificationStatus> = new Set([
+  'unverified', 'verified_related', 'rejected_unrelated', 'pending_field_check'
+]);
+
+/**
+ * Strips control characters and enforces length boundaries
+ */
+export function sanitizeInput(text: unknown, maxLength: number = 500): string {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .trim()
+    .slice(0, maxLength)
+    .trim();
+}
+
 export function getObservations(): Observation[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = readStorageRaw(STORAGE_KEY);
     if (!raw) {
       saveObservations(SEED_OBSERVATIONS);
       return SEED_OBSERVATIONS;
     }
-    const parsed = JSON.parse(raw) as Observation[];
-    return parsed;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      console.warn('[EchoTrace Storage] Stored data invalid or empty; resetting to seed dataset.');
+      saveObservations(SEED_OBSERVATIONS);
+      return SEED_OBSERVATIONS;
+    }
+    return parsed as Observation[];
   } catch (err) {
-    console.error('Failed to load observations from localStorage:', err);
+    console.error('[EchoTrace Storage] Failed to load observations; falling back to seed dataset:', err);
     return SEED_OBSERVATIONS;
   }
 }
 
 export function saveObservations(observations: Observation[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(observations));
+    if (!Array.isArray(observations)) {
+      throw new TypeError('Observations to save must be an array.');
+    }
+    // Cap in-memory history to avoid unbounded storage growth
+    const bounded = observations.slice(0, 100);
+    writeStorageRaw(STORAGE_KEY, JSON.stringify(bounded));
   } catch (err) {
-    console.error('Failed to save observations to localStorage:', err);
+    console.error('[EchoTrace Storage] Failed to persist observations:', err);
   }
 }
 
-export function createObservation(input: {
+export interface CreateObservationInput {
   title: string;
   description: string;
   category: Observation['category'];
   building: string;
   specificLocation: string;
   severity: Observation['severity'];
-  reporterType: Observation['reporterType'];
+  reporterType?: Observation['reporterType'];
   timestamp?: string;
   tags?: string[];
-}): Observation {
+}
+
+export function createObservation(input: CreateObservationInput): Observation {
+  if (!input) {
+    throw new Error('Observation input data is required.');
+  }
+
+  const cleanTitle = sanitizeInput(input.title, 150);
+  if (!cleanTitle || cleanTitle.length < 3) {
+    throw new Error('Observation title is required and must be at least 3 characters.');
+  }
+
+  const cleanDescription = sanitizeInput(input.description, 2000);
+  if (!cleanDescription || cleanDescription.length < 5) {
+    throw new Error('Observation description is required and must be at least 5 characters.');
+  }
+
+  const cleanLocation = sanitizeInput(input.specificLocation, 200);
+  if (!cleanLocation || cleanLocation.length < 2) {
+    throw new Error('Specific location is required (e.g., room number or corridor description).');
+  }
+
+  const cleanBuilding = sanitizeInput(input.building, 100);
+  if (!cleanBuilding || cleanBuilding.length < 2) {
+    throw new Error('Building name is required.');
+  }
+
+  const category = VALID_CATEGORIES.has(input.category) ? input.category : 'plumbing';
+  const severity = VALID_SEVERITIES.has(input.severity) ? input.severity : 'medium';
+  const reporterType = input.reporterType && VALID_REPORTER_TYPES.has(input.reporterType)
+    ? input.reporterType
+    : 'student';
+
+  let timestamp = new Date().toISOString();
+  if (input.timestamp) {
+    const parsed = Date.parse(input.timestamp);
+    if (!isNaN(parsed)) {
+      timestamp = new Date(parsed).toISOString();
+    }
+  }
+
+  const tags = Array.isArray(input.tags)
+    ? input.tags
+        .map(t => sanitizeInput(t, 30))
+        .filter(t => t.length > 0)
+        .slice(0, 20)
+    : [];
+
   const currentObservations = getObservations();
   const nextNum = currentObservations.length + 1;
   const id = `OBS-2026-${String(nextNum).padStart(3, '0')}`;
-  const timestamp = input.timestamp || new Date().toISOString();
 
-  // Create partial observation for similarity comparison
   const candidate: Observation = {
     id,
-    title: input.title.trim(),
-    description: input.description.trim(),
-    category: input.category,
-    building: input.building.trim(),
-    specificLocation: input.specificLocation.trim(),
+    title: cleanTitle,
+    description: cleanDescription,
+    category,
+    building: cleanBuilding,
+    specificLocation: cleanLocation,
     timestamp,
-    severity: input.severity,
+    severity,
     status: 'open',
-    reporterType: input.reporterType || 'student',
+    reporterType,
     isSyntheticDemo: false,
-    tags: input.tags || [],
+    tags,
     suggestedMatches: [],
     timeline: [
       {
@@ -391,8 +504,8 @@ export function createObservation(input: {
         timestamp,
         type: 'report_filed',
         title: 'Observation Submitted',
-        description: `Logged in ${input.building} (${input.specificLocation}). Severity: ${input.severity.toUpperCase()}.`,
-        actor: input.reporterType === 'facility_staff' ? 'Facility Staff' : 'Campus Reporter',
+        description: `Logged in ${cleanBuilding} (${cleanLocation}). Severity: ${severity.toUpperCase()}.`,
+        actor: reporterType === 'facility_staff' ? 'Facility Staff' : 'Campus Reporter',
         badgeType: 'report'
       }
     ]
@@ -431,6 +544,14 @@ export function updateObservationStatus(
   notes?: string,
   actor: string = 'Facility Operations'
 ): Observation | null {
+  if (!VALID_STATUSES.has(newStatus)) {
+    console.error(`[EchoTrace Storage] Invalid problem status: ${newStatus}`);
+    return null;
+  }
+
+  const cleanNotes = notes ? sanitizeInput(notes, 1000) : undefined;
+  const cleanActor = sanitizeInput(actor, 100) || 'Facility Operations';
+
   const observations = getObservations();
   const index = observations.findIndex(o => o.id === id);
   if (index === -1) return null;
@@ -444,8 +565,8 @@ export function updateObservationStatus(
     timestamp: new Date().toISOString(),
     type: 'status_changed',
     title: `Status Changed to ${newStatus.replace('_', ' ').toUpperCase()}`,
-    description: notes || `Operational status transitioned to ${newStatus}.`,
-    actor,
+    description: cleanNotes || `Operational status transitioned to ${newStatus}.`,
+    actor: cleanActor,
     badgeType: newStatus === 'resolved' ? 'resolution' : 'action'
   });
 
@@ -461,6 +582,14 @@ export function verifyMatchRelationship(
   notes: string = '',
   actor: string = 'Human Facility Inspector'
 ): Observation | null {
+  if (!VALID_VERIFICATIONS.has(verification)) {
+    console.error(`[EchoTrace Storage] Invalid verification status: ${verification}`);
+    return null;
+  }
+
+  const cleanNotes = sanitizeInput(notes, 1000);
+  const cleanActor = sanitizeInput(actor, 100) || 'Human Facility Inspector';
+
   const observations = getObservations();
   const index = observations.findIndex(o => o.id === observationId);
   if (index === -1) return null;
@@ -470,8 +599,8 @@ export function verifyMatchRelationship(
   if (matchIndex === -1) return null;
 
   obs.suggestedMatches[matchIndex].verificationStatus = verification;
-  obs.suggestedMatches[matchIndex].verificationNotes = notes;
-  obs.suggestedMatches[matchIndex].verifiedBy = actor;
+  obs.suggestedMatches[matchIndex].verificationNotes = cleanNotes;
+  obs.suggestedMatches[matchIndex].verifiedBy = cleanActor;
   obs.suggestedMatches[matchIndex].verifiedAt = new Date().toISOString();
 
   const isVerified = verification === 'verified_related';
@@ -481,8 +610,8 @@ export function verifyMatchRelationship(
     timestamp: new Date().toISOString(),
     type: isVerified ? 'relation_verified' : 'relation_rejected',
     title: isVerified ? `Relationship Verified (#${targetMatchId})` : `Relationship Rejected (#${targetMatchId})`,
-    description: notes || (isVerified ? `Field inspector verified physical connection to #${targetMatchId}.` : `Field inspector confirmed observations are unrelated.`),
-    actor,
+    description: cleanNotes || (isVerified ? `Field inspector verified physical connection to #${targetMatchId}.` : `Field inspector confirmed observations are unrelated.`),
+    actor: cleanActor,
     badgeType: 'human'
   });
 
@@ -496,6 +625,8 @@ export function togglePlaybookTask(
   actionId: string,
   userName: string = 'Campus Facility Tech'
 ): Observation | null {
+  const cleanUser = sanitizeInput(userName, 100) || 'Campus Facility Tech';
+
   const observations = getObservations();
   const index = observations.findIndex(o => o.id === observationId);
   if (index === -1) return null;
@@ -508,7 +639,7 @@ export function togglePlaybookTask(
 
   action.isCompleted = !action.isCompleted;
   action.completedAt = action.isCompleted ? new Date().toISOString() : undefined;
-  action.completedBy = action.isCompleted ? userName : undefined;
+  action.completedBy = action.isCompleted ? cleanUser : undefined;
 
   if (action.isCompleted) {
     obs.timeline.push({
@@ -518,7 +649,7 @@ export function togglePlaybookTask(
       type: 'preventive_action',
       title: `Playbook Action Completed: ${action.title}`,
       description: action.description,
-      actor: userName,
+      actor: cleanUser,
       badgeType: 'action'
     });
   }
@@ -529,6 +660,7 @@ export function togglePlaybookTask(
 }
 
 export function resetToSeedData(): Observation[] {
+  inMemoryFallback = {};
   saveObservations(SEED_OBSERVATIONS);
   return SEED_OBSERVATIONS;
 }
