@@ -13,7 +13,7 @@ describe('Playbook Engine - Contextual Recurrence Prevention Playbooks', () => {
     timestamp: '2026-10-14T10:00:00.000Z',
     severity: 'high',
     status: 'open',
-    reporterType: 'faculty_staff',
+    reporterType: 'facility_staff',
     isSyntheticDemo: false,
     tags: ['test'],
     suggestedMatches: [],

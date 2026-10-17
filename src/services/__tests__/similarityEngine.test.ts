@@ -108,7 +108,7 @@ describe('Similarity Engine - Multi-Signal Temporal & Semantic Matcher', () => {
       timestamp: '2026-10-06T09:00:00.000Z',
       severity: 'low',
       status: 'open',
-      reporterType: 'faculty_staff',
+      reporterType: 'facility_staff',
       isSyntheticDemo: false,
       tags: ['moisture'],
       suggestedMatches: [],
